@@ -99,6 +99,7 @@ use strict;
 use warnings;
 
 use Qpsmtpd::Constants;
+use NetAddr::IP;
 
 my $VERSION = 0.02;
 
@@ -145,15 +146,25 @@ sub check_host {
 
     my $config_arg = $self->{_per_recipient} ? {rcpt => $rcpt, %MERGE} : {};
     for my $h ($self->qp->config('whitelisthosts', $config_arg)) {
+
+        my $ipNet = NetAddr::IP->new($ip);
+        my $hNet  = NetAddr::IP->new($h);
+
         if ($h eq $ip or $ip =~ /^\Q$h\E/) {
             $self->qp->connection->notes('whitelisthost', 1);
-            $self->log(2, "pass, is a whitelisted host");
+            $self->log(2, "pass, $ip is a whitelisted host");
             $self->adjust_karma(5);
             return OK;
+        } elsif ( $ipNet->within($hNet) ) {
+            $self->qp->connection->notes('whitelisthost', 1);
+            $self->log(2, "pass, $ip is a whitelisted host");
+            $self->adjust_karma(5);
+            return OK;
+        } else {
+            $self->log(LOGDEBUG, "skip: $ip is not whitelisted");
+            return DECLINED;
         }
     }
-    $self->log(LOGDEBUG, "skip: $ip is not whitelisted");
-    return DECLINED;
 }
 
 sub helo_helper {
@@ -175,6 +186,8 @@ sub check_helo {
     for my $h ($self->qp->config('whitelisthelo', $config_arg)) {
         if ($helo and lc $h eq lc $helo) {
             $self->qp->connection->notes('whitelisthelo', 1);
+	    $self->is_naughty(0);       # see plugins/naughty
+ 	    $self->adjust_karma(5);
             $self->log(2, "helo host $helo in whitelisthelo");
             return OK;
         }
@@ -202,6 +215,8 @@ sub check_sender {
 
         if ($addr eq $h or $host eq $h) {
             $transaction->notes('whitelistsender', 1);
+	    $self->is_naughty(0);       # see plugins/naughty
+            $self->adjust_karma(5);
             $self->log(2, "envelope sender $addr in whitelistsenders");
             return OK;
         }
@@ -223,6 +238,8 @@ sub check_rcpt {
         if ($addr eq $h or $host eq $h) {
             my $note = $transaction->notes('whitelistrcpt');
             $transaction->notes('whitelistrcpt', ++$note);
+	    $self->is_naughty(0);       # see plugins/naughty
+            $self->adjust_karma(5);
             $self->log(2, "recipient $addr in whitelistrcpt");
             return OK;
         }
